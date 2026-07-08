@@ -1,26 +1,51 @@
 @import "tailwindcss";
 
+
+/* ---- Academic Light Theme ---- */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg:#f5f6f8;
+  --fg:#1a1a1a;
+  --card:#ffffff;
+  --border:#dfe1e6;
+  --hover:#f1f3f7;
+  --accent:#3366cc; /* academic blue */
+  --muted:#6b7280;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ---- Dark ---- */
+.dark {
+  --bg:#101214;
+  --fg:#f5f6f8;
+  --card:#161a1d;
+  --border:#272b30;
+  --hover:#1d2226;
+  --accent:#6699ff;
+  --muted:#9ca3af;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+
+/* ---- Global Body ---- */
+body{
+  background:var(--bg);
+  color:var(--fg);
+  font-family:-apple-system, Inter, system-ui, sans-serif;
+  letter-spacing: 0.1px;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ---- Links ---- */
+a{
+  color:var(--accent);
+  text-decoration:none;
+  font-weight: 500;
 }
+
+/* ---- Card Class ---- */
+.ev-card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:24px;
+  box-shadow: rgba(0, 0, 0, 0.04) 0px 2px 4px;
+}
+
