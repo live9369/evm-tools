@@ -10,6 +10,7 @@ import {
 import { buildTxRequest } from "@/app/tools/onchain/buildTxRequest";
 import {
   applyFastFeesToTx,
+  type FastTxFeeSettings,
   resolveFastTxFees,
 } from "@/app/tools/onchain/fastTxFees";
 import {
@@ -42,6 +43,12 @@ export type SwapForm = {
   deadlineMinutes: string;
   nativeIn: boolean;
   nativeOut: boolean;
+  advancedGasEnabled: boolean;
+  useEip1559: boolean;
+  customGasPriceGwei: string;
+  customGasLimit: string;
+  customMaxFeePerGasGwei: string;
+  customMaxPriorityFeePerGasGwei: string;
   privateKeysText: string;
 };
 
@@ -258,6 +265,81 @@ function parseSlippageBps(percent: string): number {
   return Math.round(value * 100);
 }
 
+function parseOptionalGweiToWei(value: string, label: string): bigint | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    const wei = parseUnits(trimmed, "gwei");
+    if (wei <= BigInt(0)) {
+      throw new Error(`${label} 需大于 0`);
+    }
+    return wei;
+  } catch (err) {
+    throw new Error(`${label} 不是有效的 gwei 数值`);
+  }
+}
+
+function parseOptionalGasLimit(value: string): bigint | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  let gas: bigint;
+  try {
+    gas = BigInt(trimmed);
+  } catch {
+    throw new Error("Gas Limit 不是有效的整数");
+  }
+  if (gas <= BigInt(0)) throw new Error("Gas Limit 需大于 0");
+  return gas;
+}
+
+function buildAdvancedGasConfig(
+  form: SwapForm
+): { gasLimit: string; feeSettings?: FastTxFeeSettings } {
+  if (!form.advancedGasEnabled) {
+    return { gasLimit: "" };
+  }
+
+  const gasLimitStr = form.customGasLimit.trim();
+  // 只负责校验和规范化；真正传参仍用字符串
+  parseOptionalGasLimit(gasLimitStr);
+
+  if (!form.useEip1559) {
+    const feeSettings: FastTxFeeSettings = { useEip1559: false };
+    const gasPrice = parseOptionalGweiToWei(
+      form.customGasPriceGwei,
+      "Gas Price"
+    );
+    if (gasPrice != null) feeSettings.gasPrice = gasPrice;
+    return { gasLimit: gasLimitStr, feeSettings };
+  }
+
+  const feeSettings: FastTxFeeSettings = { useEip1559: true };
+  const maxFeePerGas = parseOptionalGweiToWei(
+    form.customMaxFeePerGasGwei,
+    "maxFeePerGas"
+  );
+  const maxPriorityFeePerGas = parseOptionalGweiToWei(
+    form.customMaxPriorityFeePerGasGwei,
+    "maxPriorityFeePerGas"
+  );
+  if (maxFeePerGas != null) feeSettings.maxFeePerGas = maxFeePerGas;
+  if (maxPriorityFeePerGas != null) {
+    feeSettings.maxPriorityFeePerGas = maxPriorityFeePerGas;
+  }
+
+  return { gasLimit: gasLimitStr, feeSettings };
+}
+
+function validateAdvancedGas(form: SwapForm): string {
+  if (!form.advancedGasEnabled) return "";
+  try {
+    buildAdvancedGasConfig(form);
+    return "";
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
 function resolvePath(
   tokenIn: string,
   tokenOut: string,
@@ -315,7 +397,8 @@ async function ensureApproval(
   tokenAddress: string,
   spender: string,
   amountIn: bigint,
-  onProgress: (msg: string) => void
+  onProgress: (msg: string) => void,
+  gasConfig?: { gasLimit: string; feeSettings?: FastTxFeeSettings }
 ): Promise<string | undefined> {
   const address = await signer.getAddress();
   const provider = signer.provider as JsonRpcProvider;
@@ -328,15 +411,15 @@ async function ensureApproval(
     to: tokenAddress,
     valueEth: "0",
     data: token.interface.encodeFunctionData("approve", [spender, amountIn]),
-    gasLimit: "",
+    gasLimit: gasConfig?.gasLimit ?? "",
   });
   const fees = await resolveFastTxFees(provider, {
     to: tokenAddress,
     valueEth: "0",
     data: base.data,
-    gasLimit: "",
+    gasLimit: gasConfig?.gasLimit ?? "",
     from: address,
-  });
+  }, gasConfig?.feeSettings);
   const tx = await signer.sendTransaction(applyFastFeesToTx(base, fees));
   await tx.wait();
   return tx.hash;
@@ -346,18 +429,28 @@ async function sendSwapTx(
   signer: Signer,
   to: string,
   data: string,
-  valueEth: string
+  valueEth: string,
+  gasConfig?: { gasLimit: string; feeSettings?: FastTxFeeSettings }
 ): Promise<string> {
   const address = await signer.getAddress();
   const provider = signer.provider as JsonRpcProvider;
-  const base = buildTxRequest({ to, valueEth, data, gasLimit: "" });
-  const fees = await resolveFastTxFees(provider, {
+  const base = buildTxRequest({
     to,
     valueEth,
     data,
-    gasLimit: "",
-    from: address,
+    gasLimit: gasConfig?.gasLimit ?? "",
   });
+  const fees = await resolveFastTxFees(
+    provider,
+    {
+    to,
+    valueEth,
+    data,
+    gasLimit: gasConfig?.gasLimit ?? "",
+    from: address,
+    },
+    gasConfig?.feeSettings
+  );
   const tx = await signer.sendTransaction(applyFastFeesToTx(base, fees));
   return tx.hash;
 }
@@ -402,6 +495,8 @@ export function validateSwapForm(form: SwapForm): string {
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
   }
+  const advancedGasError = validateAdvancedGas(form);
+  if (advancedGasError) return advancedGasError;
   return "";
 }
 
@@ -432,6 +527,8 @@ export function validateBalanceQuery(form: SwapForm): string {
     }
     return "请至少输入一个私钥（每行一个，或 JSON 数组）";
   }
+  const advancedGasError = validateAdvancedGas(form);
+  if (advancedGasError) return advancedGasError;
   return "";
 }
 
@@ -606,6 +703,8 @@ async function warmupWallet(
   const { provider, routerAddress, form, tokenInAddr, amountConfig, decimals, signerPool } =
     prepared;
 
+  const gasConfig = buildAdvancedGasConfig(form);
+
   const notify = () => {
     if (onProgress && allWallets) onProgress(cloneWarmupWallets(allWallets));
   };
@@ -667,7 +766,8 @@ async function warmupWallet(
       (msg) => {
         entry.message = msg;
         notify();
-      }
+      },
+      gasConfig
     );
     if (approveHash) entry.approveTxHash = approveHash;
 
@@ -759,6 +859,8 @@ async function executeWalletSwap(
     signerPool,
   } = prepared;
 
+  const gasConfig = buildAdvancedGasConfig(form);
+
   const notify = () => {
     if (onProgress && allWallets) onProgress(cloneWallets(allWallets));
   };
@@ -830,7 +932,8 @@ async function executeWalletSwap(
           (msg) => {
             entry.message = msg;
             notify();
-          }
+          },
+          gasConfig
         );
         if (approveHash) entry.approveTxHash = approveHash;
       }
@@ -851,19 +954,25 @@ async function executeWalletSwap(
           "swapExactETHForTokens",
           [amountOutMin, path, address, deadline]
         );
-        swapTxHash = await sendSwapTx(signer, routerAddress, data, valueEth);
+        swapTxHash = await sendSwapTx(
+          signer,
+          routerAddress,
+          data,
+          valueEth,
+          gasConfig
+        );
       } else if (form.nativeOut) {
         const data = router.interface.encodeFunctionData(
           "swapExactTokensForETH",
           [amountIn, amountOutMin, path, address, deadline]
         );
-        swapTxHash = await sendSwapTx(signer, routerAddress, data, "0");
+        swapTxHash = await sendSwapTx(signer, routerAddress, data, "0", gasConfig);
       } else {
         const data = router.interface.encodeFunctionData(
           "swapExactTokensForTokens",
           [amountIn, amountOutMin, path, address, deadline]
         );
-        swapTxHash = await sendSwapTx(signer, routerAddress, data, "0");
+        swapTxHash = await sendSwapTx(signer, routerAddress, data, "0", gasConfig);
       }
     } else {
       const router = new Contract(routerAddress, smartRouterV3Abi, signer);
@@ -879,7 +988,7 @@ async function executeWalletSwap(
       const data = router.interface.encodeFunctionData("exactInputSingle", [
         params,
       ]);
-      swapTxHash = await sendSwapTx(signer, routerAddress, data, valueEth);
+      swapTxHash = await sendSwapTx(signer, routerAddress, data, valueEth, gasConfig);
     }
 
     entry.status = "success";

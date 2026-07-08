@@ -24,6 +24,18 @@ export type FastTxFees = {
   gasPrice?: bigint;
 };
 
+export type FastTxFeeSettings = {
+  /**
+   * undefined: auto（按 provider feeData 能力判断）
+   * false: 强制 legacy（只使用 gasPrice）
+   * true: 强制 EIP-1559（使用 maxFeePerGas/maxPriorityFeePerGas）
+   */
+  useEip1559?: boolean;
+  gasPrice?: bigint;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+};
+
 function bump(value: bigint, min?: bigint): bigint {
   const bumped = (value * FEE_BUMP_NUM) / FEE_BUMP_DEN;
   if (min !== undefined && bumped < min) return min;
@@ -32,7 +44,8 @@ function bump(value: bigint, min?: bigint): bigint {
 
 export async function resolveFastTxFees(
   provider: JsonRpcProvider,
-  input: TxInput
+  input: TxInput,
+  feeSettings?: FastTxFeeSettings
 ): Promise<FastTxFees> {
   const base = buildTxRequest(input);
   const estimateRequest: {
@@ -52,34 +65,55 @@ export async function resolveFastTxFees(
   const block = await provider.getBlock("latest");
   const baseFee = block?.baseFeePerGas ?? BigInt(0);
 
-  if (feeData.maxFeePerGas != null && feeData.maxPriorityFeePerGas != null) {
-    const maxPriorityFeePerGas = bump(
-      feeData.maxPriorityFeePerGas,
-      MIN_PRIORITY_FEE
-    );
-    const networkMax = feeData.maxFeePerGas;
-    const fromBaseFee =
-      baseFee > BigInt(0) ? baseFee * BigInt(2) + maxPriorityFeePerGas : networkMax;
-    const bumpedMax = bump(networkMax);
-    const maxFeePerGas =
-      fromBaseFee > bumpedMax ? fromBaseFee : bumpedMax;
+  const hasEipData =
+    feeData.maxFeePerGas != null && feeData.maxPriorityFeePerGas != null;
 
-    return {
-      gasEstimate,
-      gasLimit,
-      maxFeePerGas,
-      maxPriorityFeePerGas,
-    };
+  const forceLegacy = feeSettings?.useEip1559 === false;
+  const forceEip1559 = feeSettings?.useEip1559 === true;
+
+  if (forceLegacy || (!forceEip1559 && !hasEipData)) {
+    const gasPrice =
+      feeSettings?.gasPrice ??
+      bump(feeData.gasPrice ?? parseUnits("30", "gwei"));
+
+    return { gasEstimate, gasLimit, gasPrice };
   }
 
-  const gasPrice = bump(
-    feeData.gasPrice ?? parseUnits("30", "gwei")
-  );
+  // EIP-1559 path (forced or provider supports it)
+  const providedPriority = feeSettings?.maxPriorityFeePerGas;
+  let maxPriorityFeePerGas =
+    providedPriority ??
+    (feeData.maxPriorityFeePerGas != null
+      ? bump(feeData.maxPriorityFeePerGas, MIN_PRIORITY_FEE)
+      : MIN_PRIORITY_FEE);
+  if (maxPriorityFeePerGas < MIN_PRIORITY_FEE) {
+    maxPriorityFeePerGas = MIN_PRIORITY_FEE;
+  }
+
+  let maxFeePerGas: bigint;
+  if (feeSettings?.maxFeePerGas != null) {
+    maxFeePerGas = feeSettings.maxFeePerGas;
+  } else if (feeData.maxFeePerGas != null) {
+    const networkMax = feeData.maxFeePerGas;
+    const fromBaseFee =
+      baseFee > BigInt(0)
+        ? baseFee * BigInt(2) + maxPriorityFeePerGas
+        : networkMax;
+    const bumpedMax = bump(networkMax);
+    maxFeePerGas = fromBaseFee > bumpedMax ? fromBaseFee : bumpedMax;
+  } else {
+    // Fallback: when feeData doesn't provide maxFeePerGas, still prefer EIP-1559.
+    maxFeePerGas =
+      baseFee > BigInt(0)
+        ? baseFee * BigInt(2) + maxPriorityFeePerGas
+        : bump(feeData.gasPrice ?? parseUnits("30", "gwei"));
+  }
 
   return {
     gasEstimate,
     gasLimit,
-    gasPrice,
+    maxFeePerGas,
+    maxPriorityFeePerGas,
   };
 }
 

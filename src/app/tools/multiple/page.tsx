@@ -46,6 +46,12 @@ const emptyForm: SwapForm = {
   deadlineMinutes: "20",
   nativeIn: false,
   nativeOut: false,
+  advancedGasEnabled: false,
+  useEip1559: false,
+  customGasPriceGwei: "",
+  customGasLimit: "",
+  customMaxFeePerGasGwei: "",
+  customMaxPriorityFeePerGasGwei: "",
   privateKeysText: "",
 };
 
@@ -400,6 +406,95 @@ export default function MultipleSwapPage() {
                 placeholder="20"
               />
             </label>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => update("advancedGasEnabled", !form.advancedGasEnabled)}
+            className={`px-4 py-2 border rounded text-sm transition ${
+              form.advancedGasEnabled
+                ? "border-green-700 bg-green-600 text-white font-medium hover:bg-green-700 dark:border-green-500 dark:bg-green-600/90 dark:hover:bg-green-600"
+                : "border-green-300 text-green-700 hover:bg-green-50 dark:border-green-800 dark:text-green-300 dark:hover:bg-green-950/30"
+            }`}
+          >
+            {form.advancedGasEnabled ? "收起高级设置" : "高级设置"}
+          </button>
+
+          {form.advancedGasEnabled && (
+            <div className="space-y-3 rounded-lg border border-green-200 bg-green-50/70 p-4 dark:border-green-900 dark:bg-green-950/15">
+              <p className="text-xs text-green-700 dark:text-green-300">
+                高级 Gas 参数会覆盖默认快速上链策略，请按目标链的实际情况填写。
+              </p>
+
+              <label className="flex items-center gap-2 text-sm text-green-900 dark:text-green-100">
+                <input
+                  type="checkbox"
+                  checked={form.useEip1559}
+                  onChange={(e) => update("useEip1559", e.target.checked)}
+                />
+                使用 EIP-1559（默认 legacy）
+              </label>
+
+              <label className="block space-y-1 text-sm">
+                <span className="font-medium text-green-900 dark:text-green-100">
+                  Gas Limit（自定义，可不填）
+                </span>
+                <input
+                  className={`${inputClass} border-green-200 bg-white/90 dark:border-green-800 dark:bg-green-950/20`}
+                  value={form.customGasLimit}
+                  onChange={(e) => update("customGasLimit", e.target.value)}
+                  placeholder="不填则自动估算 +25%"
+                />
+              </label>
+
+              {!form.useEip1559 ? (
+                <label className="block space-y-1 text-sm">
+                  <span className="font-medium text-green-900 dark:text-green-100">
+                    Gas Price（gwei，自定义，可不填）
+                  </span>
+                  <input
+                    className={`${inputClass} border-green-200 bg-white/90 dark:border-green-800 dark:bg-green-950/20`}
+                    value={form.customGasPriceGwei}
+                    onChange={(e) =>
+                      update("customGasPriceGwei", e.target.value)
+                    }
+                    placeholder="不填则自动加速"
+                  />
+                </label>
+              ) : (
+                <>
+                  <label className="block space-y-1 text-sm">
+                    <span className="font-medium text-green-900 dark:text-green-100">
+                      maxFeePerGas（gwei，自定义，可不填）
+                    </span>
+                    <input
+                      className={`${inputClass} border-green-200 bg-white/90 dark:border-green-800 dark:bg-green-950/20`}
+                      value={form.customMaxFeePerGasGwei}
+                      onChange={(e) =>
+                        update("customMaxFeePerGasGwei", e.target.value)
+                      }
+                      placeholder="不填则按当前网络基准计算"
+                    />
+                  </label>
+
+                  <label className="block space-y-1 text-sm">
+                    <span className="font-medium text-green-900 dark:text-green-100">
+                      maxPriorityFeePerGas（gwei，自定义，可不填）
+                    </span>
+                    <input
+                      className={`${inputClass} border-green-200 bg-white/90 dark:border-green-800 dark:bg-green-950/20`}
+                      value={form.customMaxPriorityFeePerGasGwei}
+                      onChange={(e) =>
+                        update("customMaxPriorityFeePerGasGwei", e.target.value)
+                      }
+                      placeholder="不填则至少 2 gwei"
+                    />
+                  </label>
+                </>
+              )}
+            </div>
           )}
         </div>
 
